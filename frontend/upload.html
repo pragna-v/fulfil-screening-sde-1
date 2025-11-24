@@ -1,0 +1,67 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <title>Upload CSV — Fulfil Task</title>
+  <style>
+    body { font-family: Arial, sans-serif; padding: 20px; }
+    #progress { width: 100%; background: #eee; height: 20px; border-radius: 6px; overflow: hidden; margin-top: 12px; }
+    #bar { height: 100%; width: 0%; background: linear-gradient(90deg,#4caf50,#8bc34a); transition: width 0.3s ease; }
+    #status { margin-top: 8px; font-size: 14px; }
+    .btn { display:inline-block; padding:8px 12px; margin-left:8px; cursor:pointer; border-radius:6px; border:1px solid #ccc; background:#fff; }
+  </style>
+</head>
+<body>
+  <h2>Upload CSV</h2>
+  <p>CSV headers expected: <code>sku,name,description,price,active</code></p>
+
+  <input type="file" id="file" accept=".csv" />
+  <button id="upload" class="btn">Upload</button>
+
+  <div id="progress"><div id="bar"></div></div>
+  <p id="status"></p>
+
+<script>
+document.getElementById('upload').onclick = async () => {
+  const file = document.getElementById('file').files[0];
+  if (!file) return alert("Choose a CSV file");
+
+  const form = new FormData();
+  form.append("file", file);
+
+  // Post file to the upload endpoint
+  const res = await fetch("/upload", { method: "POST", body: form });
+  if (!res.ok) {
+    const txt = await res.text();
+    return alert("Upload failed: " + txt);
+  }
+  const { job_id } = await res.json();
+
+  // Listen to server-sent events for progress
+  const evt = new EventSource(`/jobs/${job_id}/events`);
+  evt.onmessage = e => {
+    try {
+      const data = JSON.parse(e.data);
+      const processed = data.processed || 0;
+      const total = data.total || 1;
+      const pct = Math.min(100, Math.round((processed / total) * 100));
+      document.getElementById("bar").style.width = pct + "%";
+      document.getElementById("status").innerText =
+        `Processed ${processed} / ${total} rows (${pct}%)`;
+
+      if (data.status === "done") {
+        evt.close();
+        document.getElementById("status").innerText = "Import completed!";
+      }
+    } catch (err) {
+      console.error("SSE parse error", err);
+    }
+  };
+
+  evt.onerror = () => {
+    document.getElementById("status").innerText = "Connection lost to progress stream.";
+  };
+};
+</script>
+</body>
+</html>
